@@ -18,7 +18,7 @@ import (
 
 var config Config
 
-//code 1
+// code 1
 func init() {
 	jsonFile, err := os.Open("/etc/openvpn/plugin/config.json")
 	if err != nil {
@@ -52,7 +52,7 @@ func init() {
 	log.SetFormatter(&log.TextFormatter{FullTimestamp: true, PadLevelText: true})
 }
 
-//code 2
+// code 2
 func getEnvironment() {
 	printEnvExecutable := "/usr/bin/printenv"
 
@@ -78,7 +78,7 @@ func getEnvironment() {
 	os.Exit(0)
 }
 
-//code 3
+// code 3
 func authenticateUser(repository *SQLiteRepository) {
 	if len(os.Args) <= 2 {
 		log.Errorf("authenticate: 'null' file path.")
@@ -188,7 +188,7 @@ func authenticateUser(repository *SQLiteRepository) {
 	}
 }
 
-//code 5
+// code 5
 func isValidUTF8FromHex(hexaString string) bool {
 	numberStr := strings.Replace(strings.ToLower(hexaString), "0x", "", -1)
 
@@ -201,12 +201,16 @@ func isValidUTF8FromHex(hexaString string) bool {
 	return utf8.Valid(decoded)
 }
 
-//code 6
+// code 6
 func accountingRequest(requestType string, repository *SQLiteRepository, sessionId int) {
 	log.Info("accountingRequest: prepare send request to " + config.Radius.Accounting.Server + " with request type: " + requestType)
 	var accountingCommand string
 	userId := os.Getenv("trusted_ip") + ":" + os.Getenv("trusted_port")
 	userIpAddress := os.Getenv("ifconfig_pool_remote_ip")
+
+	// Debug environment variables
+	log.Infof("accountingRequest: trusted_ip=%s, trusted_port=%s, ifconfig_pool_remote_ip=%s, userId=%s",
+		os.Getenv("trusted_ip"), os.Getenv("trusted_port"), os.Getenv("ifconfig_pool_remote_ip"), userId)
 
 	log.Info("accountingRequest: get user data with Id " + userId)
 	userClient, errClient := repository.GetById(userId)
@@ -224,23 +228,61 @@ func accountingRequest(requestType string, repository *SQLiteRepository, session
 		}
 	}
 
+	// Construct accountingCommand with comma-separated attributes and trailing newline
 	switch requestType {
 	case "start":
-		accountingCommand = "Class=" + userClient.ClassName + ",Acct-Session-Id=" + strconv.Itoa(sessionId) + ",Acct-Status-Type=Start,User-Name=" + userClient.CommonName + ",Calling-Station-Id=" + config.ServerInfo.IpAddress + ",NAS-Identifier=" + config.ServerInfo.Identifier + ",Framed-IP-Address=" + userIpAddress
+		accountingCommand = "User-Name=" + userClient.CommonName + "," +
+			"Acct-Status-Type=Start," +
+			"NAS-IP-Address=" + config.ServerInfo.IpAddress + "," +
+			"NAS-Identifier=" + config.ServerInfo.Identifier + "," +
+			"NAS-Port-Type=Virtual," +
+			"Service-Type=Outbound-User," +
+			"Acct-Session-Id=" + strconv.Itoa(sessionId) + "," +
+			"Acct-Unique-Session-Id=" + strconv.Itoa(sessionId) + "," +
+			"Framed-IP-Address=" + userIpAddress + "," +
+			"Message-Authenticator=0x00\n"
 	case "update":
-		accountingCommand = "Class=" + userClient.ClassName + ",Acct-Session-Id=" + strconv.Itoa(sessionId) + ",Acct-Status-Type=Interim-Update,User-Name=" + userClient.CommonName + ",Calling-Station-Id=" + config.ServerInfo.IpAddress + ",NAS-Identifier=" + config.ServerInfo.Identifier + ",Framed-IP-Address=" + userIpAddress
+		accountingCommand = "User-Name=" + userClient.CommonName + "," +
+			"Acct-Status-Type=Interim-Update," +
+			"NAS-IP-Address=" + config.ServerInfo.IpAddress + "," +
+			"NAS-Identifier=" + config.ServerInfo.Identifier + "," +
+			"NAS-Port-Type=Virtual," +
+			"Service-Type=Outbound-User," +
+			"Acct-Session-Id=" + strconv.Itoa(sessionId) + "," +
+			"Acct-Unique-Session-Id=" + strconv.Itoa(sessionId) + "," +
+			"Framed-IP-Address=" + userIpAddress + "," +
+			"Message-Authenticator=0x00\n"
 	case "stop":
-		accountingCommand = "Class=" + userClient.ClassName + ",Acct-Session-Id=" + strconv.Itoa(sessionId) + ",Acct-Status-Type=Stop,User-Name=" + userClient.CommonName + ",Calling-Station-Id=" + config.ServerInfo.IpAddress + ",NAS-Identifier=" + config.ServerInfo.Identifier + ",Framed-IP-Address=" + userIpAddress + ",Acct-Terminate-Cause=User-Request"
+		accountingCommand = "User-Name=" + userClient.CommonName + "," +
+			"Acct-Status-Type=Stop," +
+			"NAS-IP-Address=" + config.ServerInfo.IpAddress + "," +
+			"NAS-Identifier=" + config.ServerInfo.Identifier + "," +
+			"NAS-Port-Type=Virtual," +
+			"Service-Type=Outbound-User," +
+			"Acct-Session-Id=" + strconv.Itoa(sessionId) + "," +
+			"Acct-Unique-Session-Id=" + strconv.Itoa(sessionId) + "," +
+			"Framed-IP-Address=" + userIpAddress + "," +
+			"Acct-Terminate-Cause=User-Request," +
+			"Message-Authenticator=0x00\n"
 	default:
 		log.Errorf("accountingRequest: '" + requestType + "' request type is unknown.")
 		os.Exit(61)
 	}
 
+	log.Infof("accountingRequest: accountingCommand: %s", accountingCommand)
+
 	log.Info("accountingRequest: sent request to " + config.Radius.Accounting.Server + " with request type: " + requestType)
 
 	radClientPath := "/usr/bin/radclient"
 
+	if _, err := os.Stat(radClientPath); os.IsNotExist(err) {
+		log.Errorf("accountingRequest: radclient not found at %s", radClientPath)
+		os.Exit(66)
+	}
+
 	cmdArgs := []string{"-x", config.Radius.Accounting.Server, "acct", config.Radius.Accounting.Secret}
+
+	log.Infof("accountingRequest: radclient command: %s %s", radClientPath, strings.Join(cmdArgs, " "))
 
 	var stdout, stderr bytes.Buffer
 
@@ -254,7 +296,7 @@ func accountingRequest(requestType string, repository *SQLiteRepository, session
 	err := cmd.Run()
 
 	if err != nil {
-		log.Errorf("accountingRequest: error: %s", err.Error())
+		log.Errorf("accountingRequest: error: %s, stdout: %s, stderr: %s", err.Error(), stdout.String(), stderr.String())
 		os.Exit(62)
 	}
 
@@ -266,7 +308,6 @@ func accountingRequest(requestType string, repository *SQLiteRepository, session
 	}
 
 	var isReceived bool
-
 	for _, outStr := range outStrs {
 		if strings.HasPrefix(outStr, "Received Accounting-Response Id") {
 			isReceived = true
@@ -285,7 +326,6 @@ func accountingRequest(requestType string, repository *SQLiteRepository, session
 			log.Errorf("accountingRequest: unable to delete data %s", err.Error())
 			os.Exit(65)
 		}
-
 		log.Info("accountingRequest: delete user data with Id " + userId)
 	}
 
